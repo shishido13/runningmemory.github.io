@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Memory Rain - Sample Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #00050e; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; }
+        canvas { display: block; }
+
+        /* メッセージ表示エリア */
+        #msg-area {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #88ccff;
+            text-align: center;
+            pointer-events: none;
+            transition: opacity 1s;
+            z-index: 5;
+        }
+        .title-text { font-size: 2rem; margin-bottom: 10px; letter-spacing: 0.2em; text-shadow: 0 0 15px rgba(136, 204, 255, 0.6); }
+        .sub-msg { font-size: 0.9rem; color: #557799; }
+
+        /* 詳細カード (HTMLオーバーレイ) */
+        #detail-card {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 600px;
+            max-width: 90%;
+            height: 70vh; /* 高さを制限してスクロール可能に */
+            transform: translate(-50%, -50%) scale(0.9);
+            
+            /* ガラスモーフィズム風デザイン */
+            background: rgba(10, 15, 30, 0.85);
+            border: 1px solid rgba(100, 150, 255, 0.4);
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.9), inset 0 0 30px rgba(50, 100, 200, 0.1);
+            backdrop-filter: blur(12px);
+            border-radius: 8px;
+            padding: 40px;
+            color: #ddeeff;
+            
+            display: none; /* 初期非表示 */
+            flex-direction: column;
+            opacity: 0;
+            z-index: 20;
+            pointer-events: auto;
+            transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        /* カード内コンテンツ */
+        .card-header {
+            margin-bottom: 20px;
+            border-bottom: 1px solid rgba(100, 150, 255, 0.3);
+            padding-bottom: 15px;
+            flex-shrink: 0;
+        }
+        .card-date {
+            font-size: 1.2rem;
+            color: #aaddff;
+            margin-bottom: 5px;
+            text-shadow: 0 0 5px rgba(100,200,255,0.5);
+        }
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        /* スクロールエリア */
+        .card-body {
+            flex-grow: 1;
+            overflow-y: auto; /* 縦スクロール有効化 */
+            font-size: 1.1rem;
+            line-height: 1.9;
+            white-space: pre-wrap;
+            text-align: justify;
+            padding-right: 10px;
+        }
+
+        /* スクロールバーのカスタマイズ */
+        .card-body::-webkit-scrollbar { width: 6px; }
+        .card-body::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        .card-body::-webkit-scrollbar-thumb { background: rgba(100, 150, 255, 0.4); border-radius: 3px; }
+        .card-body::-webkit-scrollbar-thumb:hover { background: rgba(100, 150, 255, 0.7); }
+
+        .close-hint {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #557799;
+            cursor: pointer;
+            flex-shrink: 0;
+            letter-spacing: 0.1em;
+        }
+        .close-hint:hover { color: #fff; }
+
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.esm.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+<div id="msg-area">
+    <div class="title-text">Diary Archive</div>
+    <div class="sub-msg">500 fragments of memory</div>
+</div>
+
+<!-- 詳細カード (HTML) -->
+<div id="detail-card">
+    <div class="card-header">
+        <div class="card-date" id="d-date"></div>
+        <div class="card-title" id="d-title"></div>
+    </div>
+    <div class="card-body" id="d-content"></div>
+    <div class="close-hint" onclick="window.closeCard()">
+        CLOSE
+    </div>
+</div>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import TWEEN from '@tweenjs/tween.js';
+
+    // ==========================================
+    // 1. ダミーデータ生成ロジック
+    // ==========================================
+    function generateDummyData(count) {
+        const data = [];
+        const startDate = new Date(2023, 0, 1);
+        
+        // 日本語のそれっぽい単語リスト
+        const words = ["光", "不安", "希望", "コーヒー", "猫", "静寂", "開発", "コード", "未来", "過去", "雨", "散歩", "本質", "喪失", "再生", "空", "夜", "約束", "忘却", "記憶"];
+        const verbs = ["見つけた", "失った", "考えた", "歩いた", "書いた", "食べた", "忘れた", "思い出した", "祈った", "眠った"];
+        const connectors = ["そして", "しかし", "だから", "あるいは", "それでも"];
+
+        // タイトル生成用
+        const titlePatterns = ["無題", "とある日のこと", "思考の断片", "メモ", ""];
+
+        for (let i = 0; i < count; i++) {
+            // 日付を少しずつずらす or ランダム
+            const d = new Date(startDate.getTime() + Math.random() * 1000 * 60 * 60 * 24 * 365 * 2); // 2年分
+            const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            
+            // タイトル生成
+            let title = "";
+            if (Math.random() > 0.3) {
+                const w = words[Math.floor(Math.random() * words.length)];
+                title = Math.random() > 0.5 ? `${w}について` : w;
+            }
+
+            // 本文生成（長さをランダムに）
+            let content = "";
+            const lines = Math.floor(Math.random() * 15) + 3; // 3〜18行
+            for (let j = 0; j < lines; j++) {
+                let line = "";
+                const phraseCount = Math.floor(Math.random() * 3) + 1;
+                for (let k = 0; k < phraseCount; k++) {
+                    const w = words[Math.floor(Math.random() * words.length)];
+                    const v = verbs[Math.floor(Math.random() * verbs.length)];
+                    line += `${w}を${v}。`;
+                }
+                if (Math.random() > 0.7) line = connectors[Math.floor(Math.random() * connectors.length)] + "、" + line;
+                content += line + (Math.random() > 0.5 ? "\n" : "");
+            }
+            
+            // 最初の行に日付を入れるスタイルを模倣
+            content = `${dateStr}\n\n${content}`;
+
+            data.push({
+                id: i,
+                date: dateStr,
+                title: title,
+                content: content
+            });
+        }
+        
+        // 日付順にソート（降順）
+        data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        return data;
+    }
+
+    // ==========================================
+    // 2. Three.js メイン処理
+    // ==========================================
+    let scene, camera, renderer, controls;
+    let diarySprites = [];
+    let rainSystem;
+    let isCardOpen = false;
+    
+    // フォント設定
+    const FONT_FAMILY = '"Yu Mincho", "Hiragino Mincho ProN", serif';
+
+    function initThree() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x00050e); 
+        scene.fog = new THREE.FogExp2(0x00050e, 0.002);
+
+        camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 100);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.5;
+
+        scene.add(new THREE.AmbientLight(0x667788, 2.0));
+        const pLight = new THREE.PointLight(0xaaddff, 1, 100);
+        pLight.position.set(0, 30, 30);
+        scene.add(pLight);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // クリック判定
+        window.addEventListener('pointerdown', onPointerDown);
+    }
+
+    // 漂うテキスト(Sprite)作成
+    function createDiaryObjects(data) {
+        data.forEach(entry => {
+            // キャンバス作成 (日付 + タイトル)
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = "rgba(120, 200, 255, 0.8)";
+            ctx.shadowBlur = 12;
+
+            // 日付
+            ctx.font = `bold 48px ${FONT_FAMILY}`;
+            ctx.fillStyle = 'rgba(200, 230, 255, 0.95)';
+            ctx.fillText(entry.date, canvas.width / 2, 80);
+
+            // タイトル (ある場合)
+            if (entry.title) {
+                ctx.font = `32px ${FONT_FAMILY}`;
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                let titleText = entry.title;
+                if (titleText.length > 12) titleText = titleText.substring(0, 12) + '...';
+                ctx.fillText(titleText, canvas.width / 2, 150);
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({ 
+                map: texture, 
+                transparent: true, 
+                opacity: 0.85,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(16, 8, 1);
+
+            // 円筒状かつ上下に広くランダム配置
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 20 + Math.random() * 50;
+            const y = (Math.random() - 0.5) * 400; // 上下に長く
+
+            sprite.position.set(
+                Math.cos(angle) * radius,
+                y,
+                Math.sin(angle) * radius
+            );
+
+            sprite.userData = {
+                entry: entry,
+                speed: 0.02 + Math.random() * 0.04,
+                originalY: y
+            };
+
+            scene.add(sprite);
+            diarySprites.push(sprite);
+        });
+    }
+
+    // 雨エフェクト
+    function createRain() {
+        const geo = new THREE.BufferGeometry();
+        const count = 2000;
+        const pos = new Float32Array(count * 3);
+        for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5)*500;
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        
+        const mat = new THREE.PointsMaterial({
+            color: 0x88ccff, size: 0.4, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending
+        });
+        rainSystem = new THREE.Points(geo, mat);
+        scene.add(rainSystem);
+    }
+
+    // ==========================================
+    // 3. UI / インタラクション
+    // ==========================================
+    const cardEl = document.getElementById('detail-card');
+    const dDate = document.getElementById('d-date');
+    const dTitle = document.getElementById('d-title');
+    const dContent = document.getElementById('d-content');
+
+    // カードを開く
+    function openCard(entry) {
+        if (isCardOpen) return;
+        isCardOpen = true;
+        controls.autoRotate = false;
+
+        dDate.textContent = entry.date;
+        dTitle.textContent = entry.title || '';
+        dContent.textContent = entry.content;
+
+        cardEl.style.display = 'flex';
+        requestAnimationFrame(() => {
+            cardEl.style.opacity = 1;
+            cardEl.style.transform = 'translate(-50%, -50%) scale(1)';
+        });
+    }
+
+    window.closeCard = function() {
+        if (!isCardOpen) return;
+        cardEl.style.opacity = 0;
+        cardEl.style.transform = 'translate(-50%, -50%) scale(0.9)';
+        setTimeout(() => {
+            cardEl.style.display = 'none';
+            isCardOpen = false;
+            controls.autoRotate = true;
+        }, 400);
+    };
+
+    function onPointerDown(e) {
+        if (isCardOpen) {
+            if (e.target.closest('.card-body')) return;
+            window.closeCard();
+            return;
+        }
+
+        const mouse = new THREE.Vector2(
+            (e.clientX / window.innerWidth) * 2 - 1,
+            -(e.clientY / window.innerHeight) * 2 + 1
+        );
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, camera);
+
+        // SpriteはBillboardなのでRaycastしやすい
+        const intersects = raycaster.intersectObjects(diarySprites);
+        if (intersects.length > 0) {
+            // 手前のものを優先
+            openCard(intersects[0].object.userData.entry);
+        }
+    }
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        TWEEN.update(time);
+
+        // 日記落下
+        diarySprites.forEach(s => {
+            if (!isCardOpen) {
+                s.position.y -= s.userData.speed;
+                // ループ
+                if (s.position.y < -200) s.position.y = 200;
+            }
+        });
+
+        // 雨落下
+        if (rainSystem) {
+            const pos = rainSystem.geometry.attributes.position.array;
+            for(let i=1; i<pos.length; i+=3) {
+                pos[i] -= 1.0;
+                if(pos[i] < -250) pos[i] = 250;
+            }
+            rainSystem.geometry.attributes.position.needsUpdate = true;
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+    }
+
+    // ==========================================
+    // 実行
+    // ==========================================
+    initThree();
+    
+    // データ生成と表示
+    const dummyData = generateDummyData(500); // 500件生成
+    createDiaryObjects(dummyData);
+    createRain();
+
+    // 開始演出
+    animate();
+    setTimeout(() => {
+        const msg = document.getElementById('msg-area');
+        msg.style.opacity = 0;
+        setTimeout(() => msg.style.display = 'none', 1000);
+    }, 2500);
+
+</script>
+</body>
+</html>
